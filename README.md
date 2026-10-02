@@ -1,49 +1,36 @@
-# Property-Price-Prediction
+# EstateVision
 
-Predicts property prices using inflation forecasts and machine learning.
+EstateVision is a Streamlit property-intelligence prototype for area-level valuation, market comparison, and future-value scenarios.
 
-**What it does**
+## Current capabilities
 
-Predicts inflation rates based on GDP growth, unemployment, and money supply. Calculates future property prices for 5, 7, and 10 years. Shows price trends across different areas with interactive charts.
+- Loads and validates the property workbook.
+- Cleans known locality-name issues and parses price ranges.
+- Estimates current property value from area and average price per square foot.
+- Separates nominal future value from value expressed in today's money.
+- Provides interactive market charts and diagnostic views.
+- Keeps the legacy inflation artifact available for inspection, but does not use it as the primary property-price model.
 
-**Requirements**
+## Run locally
 
-Python 3.x, Streamlit, scikit-learn, XGBoost, Pandas, Matplotlib, Seaborn
-
-**Setup**
-
-Install dependencies:
 ```bash
 pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-**Usage**
+The application expects `pythonproj.xlsx` in the project root. The legacy `.pkl` files are optional and are only shown in the Diagnostics page when present.
 
-First, train the model:
-```bash
-python "Property Prediction Management.py"
+## Project structure
+
+```text
+app.py                    Streamlit UI and page routing
+estatevision/data.py      Data loading, normalization, and validation
+estatevision/valuation.py Valuation and scenario calculations
+estatevision/modeling.py  Property-model data readiness checks
+tests/test_core.py        Core calculation and data-loading tests
+pythonproj.xlsx           Current area-level source data
 ```
 
-Then run the app:
-```bash
-streamlit run app.py
-```
+## Important modelling note
 
-Open http://localhost:8501 in your browser.
-
-**Files**
-
-- `app.py` - Streamlit app
-- `Property Prediction Management.py` - Training script
-- `pythonproj.xlsx` - Property data
-- `.pkl` files - Saved model and predictions
-
-**How it works**
-
-The model uses a stacked ensemble with Lasso, XGBoost, Ridge, and Gradient Boosting. It combines inflation predictions with property data to forecast future prices.
-
-Select a location and area, and the app calculates current and future prices based on predicted inflation and growth rates.
-
-**Deployment**
-
-Works on Streamlit Cloud, Heroku, or any Python hosting. Just include all `.pkl` files and the Excel file.
+The current workbook contains area averages rather than individual property transactions. The application therefore presents scenario-based estimates, not production-grade property predictions. The next modelling milestone is to add property-level historical data, then train and validate a model using time- and geography-aware splits.

@@ -1,160 +1,294 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from mpl_toolkits.mplot3d import Axes3D
+from __future__ import annotations
+
 import pickle
-import os
+from pathlib import Path
 
-st.set_page_config(page_title="Property Price Prediction", layout="wide")
-st.title("Property Price Prediction based on Inflation Forecast")
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 
-file_path = "pythonproj.xlsx"
+from estatevision.data import load_property_data, validate_property_data
+from estatevision.modeling import training_readiness
+from estatevision.valuation import (
+    area_summary,
+    comparable_areas,
+    current_value,
+    current_value_range,
+    format_inr,
+    projection_range_table,
+    projection_table,
+)
 
-try:
-    df = pd.read_excel(file_path)
-    st.success("File Loaded Successfully!")
-    
-    with st.expander("View Data Preview"):
-        st.dataframe(df.iloc[:20,:])
-    
+
+ROOT = Path(__file__).resolve().parent
+DATA_PATH = ROOT / "pythonproj.xlsx"
+
+st.set_page_config(
+    page_title="EstateVision | Property Intelligence",
+    page_icon="🏠",
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(31, 78, 121, 0.10), rgba(46, 125, 50, 0.08));
+        border: 1px solid rgba(128, 128, 128, 0.22);
+        border-radius: 12px;
+        padding: 0.8rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+@st.cache_data(show_spinner=False)
+def get_property_data() -> pd.DataFrame:
+    return load_property_data(DATA_PATH)
+
+
+@st.cache_data(show_spinner=False)
+def get_experimental_macro_forecast() -> tuple[float | None, dict]:
+    """Read the legacy inflation artifact without making it the price model."""
     try:
-        with open('stacked_model.pkl', 'rb') as f:
-            stacked_model = pickle.load(f)
-        with open('y_pred.pkl', 'rb') as f:
-            y_pred = pickle.load(f)
-        with open('y_test.pkl', 'rb') as f:
-            y_test = pickle.load(f)
-        with open('metrics.pkl', 'rb') as f:
-            metrics = pickle.load(f)
-        
+        with (ROOT / "y_pred.pkl").open("rb") as handle:
+            predictions = pd.Series(pickle.load(handle), dtype="float64")
+        with (ROOT / "metrics.pkl").open("rb") as handle:
+            metrics = pickle.load(handle)
+        if predictions.empty or not predictions.notna().all():
+            return None, metrics
+        return float(predictions.mean()), metrics
+    except (FileNotFoundError, EOFError, pickle.UnpicklingError, ValueError, TypeError):
+        return None, {}
 
-        with st.expander("View Inflation Rate Prediction"):
-            fig1, ax1 = plt.subplots(figsize=(10, 6))
-            sns.lineplot(x=range(len(y_test)), y=y_test, label='Actual', marker='o', ax=ax1)
-            sns.lineplot(x=range(len(y_pred)), y=y_pred, label='Predicted', marker='D', ax=ax1)
-            ax1.set_title("Inflation Rate Prediction")
-            ax1.set_xlabel("Index")
-            ax1.set_ylabel("Inflation Rate")
-            ax1.legend()
-            plt.tight_layout()
-            st.pyplot(fig1)
 
-        with st.expander("View 3D Inflated Price Visualization"):
-            Prices = np.linspace(50, 100, len(y_pred))
-            Time = np.linspace(5, 10, len(y_pred))
-            Time_mesh, Prices_mesh = np.meshgrid(Time, Prices)
-            Inflation_mesh = np.tile(y_pred, (len(Prices), 1)).T
+def render_sidebar(frame: pd.DataFrame) -> tuple[str, float, float, float, int]:
+    st.sidebar.title("EstateVision")
+    st.sidebar.caption("Property intelligence prototype")
 
-            fig2 = plt.figure(figsize=(18, 9))
-            ax2 = fig2.add_subplot(111, projection='3d')
-            ax2.plot_surface(Prices_mesh, Time_mesh, Inflation_mesh, cmap='viridis')
-            ax2.set_xlabel('Average Price (Lakhs)')
-            ax2.set_ylabel('Years')
-            ax2.set_zlabel('Predicted Inflation Rate')
-            plt.title('Inflated Price')
-            plt.tight_layout()
-            st.pyplot(fig2)
-            
-    except FileNotFoundError:
-        st.warning("Model files not found. Please run the training script first.")
-        y_pred = None
+    locations = sorted(frame["Areas"].unique().tolist())
+    location = st.sidebar.selectbox("Location", locations)
+    area_sqft = st.sidebar.number_input(
+        "Property area (sq ft)", min_value=100, max_value=100_000, value=1_000, step=50
+    )
+    appreciation = st.sidebar.slider(
+        "Annual property appreciation (%)", 0.0, 25.0, 8.0, 0.5
+    )
+    macro_forecast, _ = get_experimental_macro_forecast()
+    default_inflation = round(macro_forecast, 1) if macro_forecast is not None else 5.0
+    inflation = st.sidebar.slider(
+        "Annual inflation scenario (%)", 0.0, 20.0, float(min(default_inflation, 20.0)), 0.5
+    )
+    horizon = st.sidebar.slider("Projection horizon (years)", 1, 20, 10)
+    return location, float(area_sqft), appreciation, inflation, horizon
 
-    st.subheader("Future Price Prediction")
-    
-    if 'Areas' in df.columns and 'AveragePrice' in df.columns:
-        available_locations = df['Areas'].unique().tolist()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            user_loc = st.selectbox("Enter the location", available_locations)
-        with col2:
-            user_area = st.number_input("Enter desired area", min_value=1, value=1000, step=100)
-        
-        if st.button("Calculate Future Price"):
-            if y_pred is not None:
-                price = df.loc[df['Areas'] == user_loc, 'AveragePrice'].iloc[0]
-                area_price = price * user_area
-                
-                st.write(f"**Location:** {user_loc}")
-                st.write(f"**Area:** {user_area} sqft")
-                st.write(f"**Current Price:** ₹{area_price:,.2f}")
-                
-                avg_inflation = np.mean(y_pred) / 100
-                GrowthRate = 0.08
-                real_growth = GrowthRate - avg_inflation
 
-                st.write(f"**Average Inflation:** {avg_inflation*100:.2f}%")
-                st.write(f"**Real Growth Rate:** {real_growth*100:.2f}%")
-                
-                future_prices = {}
-                for years in [5, 7, 10]:
-                    future_price = area_price * ((1 + real_growth) ** years)
-                    future_prices[years] = future_price
-                    st.write(f"Price after **{years} years**: ₹{round(future_price):,}")
+def render_valuation(frame: pd.DataFrame) -> None:
+    location, area_sqft, appreciation, inflation, horizon = render_sidebar(frame)
+    selected = frame.loc[frame["Areas"] == location].iloc[0]
+    price_per_sqft = float(selected["AveragePrice"])
+    current_price = current_value(price_per_sqft, area_sqft)
+    source_low = float(selected["PriceRangeLow"])
+    source_high = float(selected["PriceRangeHigh"])
+    current_low, current_high = current_value_range(source_low, source_high, area_sqft)
 
-                st.subheader("Before vs After Property Price")
-                years = [5, 7, 10]
-                current_price = area_price
-                future_prices_list = [current_price * ((1 + real_growth) ** yr) for yr in years]
+    st.title("Property valuation workspace")
+    st.caption("Scenario-based estimates from the current area-level dataset")
 
-                fig3, ax3 = plt.subplots(figsize=(15, 5))
-                ax3.bar([f"{yr} yrs (Now)" for yr in years], [current_price]*len(years), label='Current Price', alpha=0.6)
-                ax3.bar([f"{yr} yrs (Future)" for yr in years], future_prices_list, label='Predicted Price', alpha=0.8)
-                ax3.set_ylabel("Price (INR)")
-                ax3.set_title("Before vs After Property Price")
-                plt.xticks(rotation=45)
-                ax3.legend()
-                plt.tight_layout()
-                st.pyplot(fig3)
-            else:
-                st.error("Model not loaded. Please run the training script first.")
+    first, second, third, fourth = st.columns(4)
+    first.metric("Selected area", location)
+    second.metric("Average price / sq ft", format_inr(price_per_sqft))
+    third.metric("Estimated current value", format_inr(current_price))
+    fourth.metric("Source valuation range", f"{format_inr(current_low)} – {format_inr(current_high)}")
 
-    with st.expander("View Average Total Price by Area"):
-        area_price_df = df[['Areas', 'AveragePrice']].groupby('Areas').mean()
-        area_price_df = area_price_df.sort_values('AveragePrice', ascending=False)
-        fig4, ax4 = plt.subplots(figsize=(80, 6))
-        sns.heatmap(area_price_df.T, annot=True, fmt=".0f", cmap="YlOrRd", cbar=True, linewidths=0.8, ax=ax4)
-        ax4.set_title("Average Total Price by Area")
-        plt.xticks(rotation=45, ha='right', fontsize=10)
-        plt.tight_layout()
-        st.pyplot(fig4)
+    st.info(
+        "This is currently a scenario engine, not a production-grade property-price model. "
+        "The dataset contains area averages rather than individual property transactions."
+    )
 
-    st.subheader("Top Most Expensive Areas")
-    top_n = st.slider("Select number of top areas to display", min_value=5, max_value=30, value=15, step=1)
-    
-    area_stats = df.groupby('Areas')['AveragePrice'].agg(['mean', 'count']).reset_index()
-    area_stats = area_stats.nlargest(top_n, 'mean')
-    
-    fig5, axes = plt.subplots(1, 2, figsize=(14, 5))
-    
-    sns.barplot(data=area_stats, y='Areas', x='mean', ax=axes[0], palette='rocket')
-    axes[0].set_xlabel('Average Price per Sqft (INR)', fontsize=11)
-    axes[0].set_ylabel('Areas', fontsize=11)
-    axes[0].set_title(f'Top {top_n} Most Expensive Areas', fontsize=12, fontweight='bold')
-    axes[0].grid(axis='x', alpha=0.3)
-    
-    sns.scatterplot(data=area_stats, x='mean', y='count', size='mean', 
-                    sizes=(50, 500), alpha=0.6, ax=axes[1], legend=False)
-    axes[1].set_xlabel('Average Price per Sqft (INR)', fontsize=11)
-    axes[1].set_ylabel('Number of Properties', fontsize=11)
-    axes[1].set_title('Price vs Property Count', fontsize=12, fontweight='bold')
-    axes[1].grid(alpha=0.3)
-    
-    plt.tight_layout()
-    st.pyplot(fig5)
-    st.subheader("=== Model Performance Metrics ===")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Train R2 Score", f"{metrics['r2_train']:.4f}")
-    with col2:
-        st.metric("Test R2 Score", f"{metrics['r2_test']:.4f}")
-    with col3:
-        st.metric("Test MSE", f"{metrics['mse_test']:.4f}")
-    with col4:
-        st.metric("Test RMSE", f"{metrics['rmse_test']:.4f}")
-    with col5:
-        st.metric("Test MAE", f"{metrics['mae_test']:.4f}")  
-except Exception as e:
-    st.error(f"Error loading file: {e}")
+    years = sorted(set([1, 3, 5, 7, 10, horizon]))
+    projection = projection_table(current_price, years, appreciation, inflation)
+    projection_range = projection_range_table(
+        current_low, current_high, years, appreciation, inflation
+    )
+    st.subheader("Projection")
+    st.caption(
+        f"Nominal appreciation: {appreciation:.1f}% | Inflation scenario: {inflation:.1f}%"
+    )
+
+    left, right = st.columns([1, 1.4])
+    with left:
+        st.dataframe(
+            projection_range[
+                [
+                    "Year",
+                    "Nominal low",
+                    "Nominal estimate",
+                    "Nominal high",
+                    "Today's-money low",
+                    "Today's-money high",
+                ]
+            ].style.format(
+                {
+                    "Nominal low": "₹{:,.0f}",
+                    "Nominal estimate": "₹{:,.0f}",
+                    "Nominal high": "₹{:,.0f}",
+                    "Today's-money low": "₹{:,.0f}",
+                    "Today's-money high": "₹{:,.0f}",
+                }
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+    with right:
+        chart_data = projection.melt(
+            id_vars="Year", var_name="Measure", value_name="Value"
+        )
+        chart = px.line(
+            chart_data,
+            x="Year",
+            y="Value",
+            color="Measure",
+            markers=True,
+            labels={"Value": "Property value (INR)"},
+        )
+        chart.update_layout(legend_title_text="", margin=dict(l=10, r=10, t=20, b=10))
+        st.plotly_chart(chart, use_container_width=True)
+
+    st.caption(
+        "The displayed range comes from the source workbook's reported price range. "
+        "It is a market-data range, not a statistically calibrated confidence interval."
+    )
+
+    similar = comparable_areas(frame, location)
+    st.subheader("Comparable areas")
+    st.dataframe(
+        similar[["Areas", "AveragePrice", "PriceRangeLow", "PriceRangeHigh"]].style.format(
+            {
+                "AveragePrice": "₹{:,.0f}",
+                "PriceRangeLow": "₹{:,.0f}",
+                "PriceRangeHigh": "₹{:,.0f}",
+            }
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    st.download_button(
+        "Download projection CSV",
+        data=projection_range.to_csv(index=False).encode("utf-8"),
+        file_name=f"{location.lower().replace(' ', '_')}_projection.csv",
+        mime="text/csv",
+    )
+
+    st.subheader("Selected area details")
+    st.json(
+        {
+            "Area": location,
+            "Price range in source": (
+                f"{format_inr(source_low)} – {format_inr(source_high)} per sq ft"
+            ),
+            "Selected property size": f"{area_sqft:,.0f} sq ft",
+            "Current estimate": format_inr(current_price),
+        }
+    )
+
+
+def render_market_overview(frame: pd.DataFrame) -> None:
+    st.header("Market overview")
+    summary = area_summary(frame)
+    left, right = st.columns([1.35, 1])
+    with left:
+        chart = px.bar(
+            summary.sort_values("AveragePrice").tail(15),
+            x="AveragePrice",
+            y="Areas",
+            orientation="h",
+            color="AveragePrice",
+            color_continuous_scale="Viridis",
+            labels={"AveragePrice": "Average price / sq ft"},
+        )
+        chart.update_layout(coloraxis_showscale=False, margin=dict(l=10, r=10, t=20, b=10))
+        st.plotly_chart(chart, use_container_width=True)
+    with right:
+        st.dataframe(
+            summary[["Areas", "AveragePrice", "PriceRangeLow", "PriceRangeHigh"]]
+            .head(15)
+            .style.format(
+                {
+                    "AveragePrice": "₹{:,.0f}",
+                    "PriceRangeLow": "₹{:,.0f}",
+                    "PriceRangeHigh": "₹{:,.0f}",
+                }
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
+def render_diagnostics(frame: pd.DataFrame) -> None:
+    st.header("Data and model diagnostics")
+    quality = validate_property_data(frame)
+    cols = st.columns(len(quality))
+    for column, (label, value) in zip(cols, quality.items()):
+        column.metric(label.replace("_", " ").title(), value)
+
+    readiness = training_readiness(frame)
+    st.subheader("Property-model readiness")
+    if readiness["ready"]:
+        st.success("The dataset has enough property-level fields for a first model.")
+    else:
+        st.warning(
+            "The current dataset is not ready for a reliable property-level model. "
+            "Add transaction-level records, a price target, and property area first."
+        )
+    ready_cols = st.columns(3)
+    ready_cols[0].metric("Rows available", readiness["row_count"])
+    ready_cols[1].metric("Minimum recommended", readiness["minimum_row_target"])
+    ready_cols[2].metric("Price target found", "Yes" if readiness["target_available"] else "No")
+    st.caption(
+        "Recommended fields: price, area_sqft, property_type, bedrooms, bathrooms, "
+        "property_age, transaction_date, latitude, and longitude."
+    )
+
+    forecast, metrics = get_experimental_macro_forecast()
+    st.subheader("Legacy inflation artifact")
+    if metrics:
+        st.warning(
+            "The existing inflation model is retained for inspection only. It is trained on a "
+            "small synthetic-looking dataset and is not used as the property valuation model."
+        )
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Test R²", f"{metrics.get('r2_test', 0):.3f}")
+        metric_cols[1].metric("Test RMSE", f"{metrics.get('rmse_test', 0):.3f}")
+        metric_cols[2].metric(
+            "Average forecast", f"{forecast:.2f}%" if forecast else "Unavailable"
+        )
+    else:
+        st.info("No legacy inflation artifacts were found. The app still works with manual scenarios.")
+
+    st.subheader("Source data")
+    st.dataframe(frame, hide_index=True, use_container_width=True)
+
+
+def main() -> None:
+    try:
+        frame = get_property_data()
+    except (FileNotFoundError, ValueError) as error:
+        st.error(str(error))
+        st.stop()
+
+    page = st.sidebar.radio("Workspace", ["Valuation", "Market overview", "Diagnostics"])
+    if page == "Valuation":
+        render_valuation(frame)
+    elif page == "Market overview":
+        render_market_overview(frame)
+    else:
+        render_diagnostics(frame)
+
+
+if __name__ == "__main__":
+    main()
