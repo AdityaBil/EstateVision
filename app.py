@@ -63,6 +63,10 @@ st.markdown(
     .ev-brand { margin: 0 0 2.3rem 0; }
     .ev-brand-mark { color: #D6A85F; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.22em; }
     .ev-brand-name { color: #F4F0E8; font-size: 1.45rem; font-weight: 700; letter-spacing: -0.03em; margin-top: 0.35rem; }
+    .ev-topbar { text-align: center; padding: 0.15rem 0 1.4rem; }
+    .ev-topbar h1 { margin: 0; color: #F4F0E8; font-size: clamp(2.2rem, 5vw, 4rem); font-weight: 760; letter-spacing: -0.075em; line-height: 0.95; }
+    .ev-topbar h1 span { color: #D6A85F; }
+    .ev-topbar p { margin: 0.75rem 0 0; color: #83929E; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.28em; text-transform: uppercase; }
     .ev-hero {
         background: linear-gradient(120deg, rgba(22, 34, 43, 0.96), rgba(18, 28, 35, 0.72));
         border: 1px solid rgba(214, 168, 95, 0.23);
@@ -389,6 +393,15 @@ def main() -> None:
         st.stop()
 
     page = st.sidebar.radio("Workspace", ["Valuation", "Market overview", "Diagnostics"])
+    st.markdown(
+        """
+        <div class="ev-topbar">
+            <h1>Estate<span>Vision</span></h1>
+            <p>Property intelligence, made visible</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if page == "Valuation":
         render_valuation(frame)
     elif page == "Market overview":
