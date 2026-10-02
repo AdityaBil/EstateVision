@@ -74,6 +74,23 @@ st.markdown(
     .ev-kicker { color: #D6A85F; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; }
     .ev-hero h1 { color: #F4F0E8; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.05; letter-spacing: -0.055em; margin: 0.55rem 0 0.7rem; }
     .ev-hero p { color: #AEB9C4; font-size: 1rem; margin: 0; max-width: 48rem; }
+    .ev-hero-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr); gap: 1.5rem; align-items: stretch; }
+    .ev-art {
+        min-height: 190px; position: relative; overflow: hidden; border-radius: 16px;
+        border: 1px solid rgba(214, 168, 95, 0.2);
+        background: linear-gradient(135deg, rgba(214, 168, 95, 0.18), transparent 43%), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 18px), #17252C;
+    }
+    .ev-art::before { content: ""; position: absolute; width: 180px; height: 180px; right: -42px; top: -54px; border-radius: 50%; background: radial-gradient(circle, rgba(214, 168, 95, 0.7), rgba(214, 168, 95, 0) 68%); animation: ev-pulse 4s ease-in-out infinite; }
+    .ev-art::after { content: ""; position: absolute; left: 12%; right: 12%; bottom: 20%; height: 1px; background: linear-gradient(90deg, transparent, rgba(214, 168, 95, 0.85), transparent); box-shadow: 0 -32px 0 rgba(255, 255, 255, 0.09), 0 32px 0 rgba(255, 255, 255, 0.09); }
+    .ev-art-orbit { position: absolute; inset: 18% 18%; border: 1px solid rgba(214, 168, 95, 0.3); border-radius: 50%; animation: ev-spin 16s linear infinite; }
+    .ev-art-orbit::after { content: ""; position: absolute; width: 8px; height: 8px; right: 7%; top: 18%; background: #D6A85F; border-radius: 50%; box-shadow: 0 0 18px #D6A85F; }
+    .ev-art-label { position: absolute; left: 1rem; bottom: 0.8rem; color: #F4F0E8; font-size: 0.65rem; letter-spacing: 0.17em; text-transform: uppercase; }
+    .ev-art-number { position: absolute; right: 1rem; bottom: 0.7rem; color: #D6A85F; font-size: 1.3rem; font-weight: 700; animation: ev-float 3.5s ease-in-out infinite; }
+    @keyframes ev-pulse { 0%, 100% { transform: scale(0.92); opacity: 0.65; } 50% { transform: scale(1.08); opacity: 1; } }
+    @keyframes ev-spin { to { transform: rotate(360deg); } }
+    @keyframes ev-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @media (max-width: 850px) { .ev-hero-grid { grid-template-columns: 1fr; } .ev-art { min-height: 130px; } }
+    .ev-photo-caption { color: #93A2AE; font-size: 0.76rem; margin-top: 0.3rem; }
     .ev-section { color: #F4F0E8; font-size: 1.15rem; font-weight: 650; letter-spacing: -0.02em; margin: 1.7rem 0 0.45rem; }
     .ev-note { color: #93A2AE; font-size: 0.82rem; margin-bottom: 0.85rem; }
     .stButton > button, .stDownloadButton > button {
@@ -109,7 +126,7 @@ def get_experimental_macro_forecast() -> tuple[float | None, dict]:
         return None, {}
 
 
-def render_sidebar(frame: pd.DataFrame) -> tuple[str, float, float, float, int]:
+def render_sidebar(frame: pd.DataFrame) -> tuple[str, float, float, float, int, object]:
     st.sidebar.markdown(
         """
         <div class="ev-brand">
@@ -134,11 +151,16 @@ def render_sidebar(frame: pd.DataFrame) -> tuple[str, float, float, float, int]:
         "Annual inflation scenario (%)", 0.0, 20.0, float(min(default_inflation, 20.0)), 0.5
     )
     horizon = st.sidebar.slider("Projection horizon (years)", 1, 20, 10)
-    return location, float(area_sqft), appreciation, inflation, horizon
+    photo = st.sidebar.file_uploader(
+        "Add property photo (optional)",
+        type=["png", "jpg", "jpeg"],
+        help="The photo is previewed in this app session and is not stored by EstateVision.",
+    )
+    return location, float(area_sqft), appreciation, inflation, horizon, photo
 
 
 def render_valuation(frame: pd.DataFrame) -> None:
-    location, area_sqft, appreciation, inflation, horizon = render_sidebar(frame)
+    location, area_sqft, appreciation, inflation, horizon, photo = render_sidebar(frame)
     selected = frame.loc[frame["Areas"] == location].iloc[0]
     price_per_sqft = float(selected["AveragePrice"])
     current_price = current_value(price_per_sqft, area_sqft)
@@ -149,9 +171,18 @@ def render_valuation(frame: pd.DataFrame) -> None:
     st.markdown(
         """
         <div class="ev-hero">
-            <div class="ev-kicker">Valuation workspace · Indore market</div>
-            <h1>See the value of<br>where you live.</h1>
-            <p>Explore a current estimate, compare nearby markets, and understand how appreciation and inflation reshape the future value of a property.</p>
+          <div class="ev-hero-grid">
+            <div>
+              <div class="ev-kicker">Valuation workspace · Indore market</div>
+              <h1>See the value of<br>where you live.</h1>
+              <p>Explore a current estimate, compare nearby markets, and understand how appreciation and inflation reshape the future value of a property.</p>
+            </div>
+            <div class="ev-art" aria-label="Animated market pulse visual">
+              <div class="ev-art-orbit"></div>
+              <div class="ev-art-label">Market pulse</div>
+              <div class="ev-art-number">+8.0%</div>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -167,6 +198,14 @@ def render_valuation(frame: pd.DataFrame) -> None:
         "This is currently a scenario engine, not a production-grade property-price model. "
         "The dataset contains area averages rather than individual property transactions."
     )
+
+    if photo is not None:
+        st.markdown('<div class="ev-section">Property view</div>', unsafe_allow_html=True)
+        st.image(photo, use_container_width=True)
+        st.markdown(
+            '<div class="ev-photo-caption">Session preview only · not stored by EstateVision.</div>',
+            unsafe_allow_html=True,
+        )
 
     years = sorted(set([1, 3, 5, 7, 10, horizon]))
     projection = projection_table(current_price, years, appreciation, inflation)
@@ -215,7 +254,14 @@ def render_valuation(frame: pd.DataFrame) -> None:
             markers=True,
             labels={"Value": "Property value (INR)"},
         )
-        chart.update_layout(legend_title_text="", margin=dict(l=10, r=10, t=20, b=10))
+        chart.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#AEB9C4",
+            legend_title_text="",
+            margin=dict(l=10, r=10, t=20, b=10),
+        )
         st.plotly_chart(chart, use_container_width=True)
 
     st.caption(
